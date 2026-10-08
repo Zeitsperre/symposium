@@ -1,0 +1,105 @@
+name: marp-to-pages
+concurrency: marp-to-pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python3
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+
+      - name: Install Ghostscript
+        run: |
+          sudo apt-get -y update && sudo apt-get -y install ghostscript
+
+      - name: Install ImageMagick
+        uses: mfinelli/setup-imagemagick@7bcb45380be40873a59cc0d4a457ec9228b6c84c # v8.0.0
+        with:
+          cache: true
+
+      - name: Ensure build dir exists
+        run: |
+          mkdir -p build
+
+      - name: Fetch Freud Style CSS
+        run: |
+          curl -sL https://cunhapaulo.github.io/style/freud.css -o build/freud.css
+
+      - name: Copy images directory (if exists)
+        run: |
+          cp -R img build/img
+
+      - name: Marp Build (slides.md)
+        uses: docker://marpteam/marp-cli:v4.5.0
+        with:
+          args: slides.md -o build/index.html
+        env:
+          MARP_USER: root:root
+
+      - name: Marp Build (slides.pdf)
+        uses: docker://marpteam/marp-cli:v4.5.0
+        with:
+          args: slides.md --allow-local-files -o build/slides.pdf
+        env:
+          MARP_USER: root:root
+
+      - name: Optimise PDF size
+        run: |
+          gs -sDEVICE=pdfwrite \
+          -dCompatibilityLevel=1.4 \
+          -dPDFSETTINGS=/default \
+          -dDetectDuplicateImages \
+          -dCompressFonts=true \
+          -r150 \
+          -o build/slides-optimized.pdf \
+          build/slides.pdf
+          rm build/slides.pdf
+
+      # - name: Marp Build (slides.pptx)
+      #   uses: docker://marpteam/marp-cli:v4.5.0
+      #   with:
+      #     args: slides.md --allow-local-files -o build/slides.pptx
+      #   env:
+      #     MARP_USER: root:root
+
+      # - name: Optimise PPTX size
+      #   run: |
+      #     compress-pptx build/slides.pptx
+
+      - name: Deploy preview
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1.8.1
+        with:
+          source-dir: ./build/
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+
+      - name: Deploy production
+        if: ${{ github.event_name == 'push' }}
+        uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4.8.0
+        with:
+          branch: gh-pages
+          folder: ./build/
+          clean-exclude: pr-preview/
